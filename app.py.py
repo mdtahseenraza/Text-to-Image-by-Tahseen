@@ -1,67 +1,83 @@
-import streamlit as st
+!pip install diffusers transformers torch accelerate
+
 import torch
 from diffusers import StableDiffusionPipeline
 from PIL import Image
-import os
-from uuid import uuid4
+import matplotlib.pyplot as plt
 
-# Set page configuration
-st.set_page_config(page_title="Text-to-Image Generator", layout="wide")
+model_id = "stabilityai/stable-diffusion-2-1"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Initialize session state for storing image path
-if 'image_path' not in st.session_state:
-    st.session_state.image_path = None
+pipe = StableDiffusionPipeline.from_pretrained(
+    model_id,
+    torch_dtype=torch.float16,
+    use_auth_token="your_huggingface_token"
+)
+pipe = pipe.to(device)
 
-# Create a directory to save generated images
-if not os.path.exists("generated_images"):
-    os.makedirs("generated_images")
+prompt = "A futuristic cityscape with neon lights and ablah bah, highly detailed, vibrant colors, cinematic lighting"
+negative_prompt = "blurry, low quality, distorted, extra limbs, deformed, ugly, low contrast, text, watermark"
 
-# Load the Stable Diffusion model
-@st.cache_resource
-def load_model():
-    model_id = "stabilityai/stable-diffusion-2-1"
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
-    if torch.cuda.is_available():
-        pipe = pipe.to("cuda")
-    return pipe
+parameters = {
+    "prompt": prompt,
+    "negative_prompt": negative_prompt,
+    "num_inference_steps": 50,
+    "guidance_scale": 7.5,
+    "num_images_per_prompt": 2,
+    "height": 512,
+    "width": 512,
+    "seed": 42,
+    "eta": 0.0,
+    "strength": 0.8
+}
 
-# Streamlit UI
-st.title("Stable Diffusion Text-to-Image Generator")
-st.write("Enter a prompt to generate an image using Stable Diffusion.")
+generator = torch.Generator(device=device).manual_seed(parameters["seed"])
 
-# Text input for prompt
-prompt = st.text_input("Prompt", placeholder="e.g., A futuristic city at sunset", key="prompt")
+outputs = pipe(
+    prompt=parameters["prompt"],
+    negative_prompt=parameters["negative_prompt"],
+    num_inference_steps=parameters["num_inference_steps"],
+    guidance_scale=parameters["guidance_scale"],
+    num_images_per_prompt=parameters["num_images_per_prompt"],
+    height=parameters["height"],
+    width=parameters["width"],
+    generator=generator,
+    eta=parameters["eta"]
+)
 
-# Generate button
-if st.button("Generate Image"):
-    if prompt:
-        with st.spinner("Generating image... This may take a moment."):
-            try:
-                # Load model
-                pipe = load_model()
-                
-                # Generate image
-                image = pipe(prompt).images[0]
-                
-                # Save image with unique filename
-                image_id = str(uuid4())
-                image_path = f"generated_images/{image_id}.png"
-                image.save(image_path)
-                st.session_state.image_path = image_path
-                
-                # Display success message
-                st.success("Image generated successfully!")
-            except Exception as e:
-                st.error(f"Error generating image: {str(e)}")
-    else:
-        st.error("Please enter a prompt.")
+for i, image in enumerate(outputs.images):
+    image.save(f"generated_image_{i+1}.png")
+    print(f"Image {i+1} saved as 'generated_image_{i+1}.png'")
+    plt.figure(figsize=(8, 8))
+    plt.imshow(image)
+    plt.axis("off")
+    plt.title(f"Generated Image {i+1}")
+    plt.show()
 
-# Display the generated image if available
-if st.session_state.image_path:
-    st.image(st.session_state.image_path, caption="Generated Image", use_column_width=True)
+parameter_sweep = {
+    "guidance_scale_values": [5.0, 7.5, 10.0],
+    "num_inference_steps_values": [20, 50]
+}
 
-# Add a note about requirements
-st.markdown("""
-**Note**: This app requires a GPU-enabled environment and the following packages: 
-`streamlit`, `torch`, `diffusers`, `transformers`. Ensure they are installed in your environment.
-""")
+for guidance in parameter_sweep["guidance_scale_values"]:
+    for steps in parameter_sweep["num_inference_steps_values"]:
+        print(f"\nGenerating with guidance_scale={guidance}, num_inference_steps={steps}")
+        output = pipe(
+            prompt=parameters["prompt"],
+            negative_prompt=parameters["negative_prompt"],
+            num_inference_steps=steps,
+            guidance_scale=guidance,
+            num_images_per_prompt=1,
+            height=parameters["height"],
+            width=parameters["width"],
+            generator=torch.Generator(device=device).manual_seed(parameters["seed"]),
+            eta=parameters["eta"]
+        )
+        image = output.images[0]
+        image.save(f"image_guidance_{guidance}_steps_{steps}.png")
+        print(f"Saved as 'image_guidance_{guidance}_steps_{steps}.png'")
+        plt.figure(figsize=(8, 8))
+        plt.imshow(image)
+        plt.axis("off")
+        plt.title(f"Guidance: {guidance}, Steps: {steps}")
+        plt.show()
